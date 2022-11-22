@@ -1,0 +1,918 @@
+---
+title: "A3 - Modelització predictiva"
+author: "Xavier Vizcaino Gascon"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  pdf_document: 
+    toc: yes
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggpubr)
+library(corrplot)
+library(faraway)
+library(ResourceSelection)
+library(pROC)
+library(knitr)
+```
+
+```{r general, include=FALSE}
+mypalette<-c("darkorange","darkorange1","darkorange2","darkorange3","darkorange4" )
+```
+
+## 1. Regressió lineal
+
+*L'exposició a les partícules (PM10), a l'ozó (O3), al diòxid de nitrogen (NO2) i el diòxid de sofre (SO2), plantegen greus riscos per a la salut. Les directrius de l'OMS sobre la qualitat de l'aire estableixen els límits sobre aquests principals contaminants atmosfèrics.*
+
+* *PM10: Límit de 45 micrograms de partícules per cada metre cúbic* $\mu/m^3$. 
+* *SO2: Límit de 40* $\mu/m^3$ 
+* *NO2: Límit de 25* $\mu/m^3$
+* *O3: Límit de 60* $\mu/m^3$
+
+*L'índex de qualitat de l'aire es calcula de manera individual tenint en compte cadascun de dites contaminants. Tots aquests valors estan referits a la mitjana diària. Amb referència a valors màxims diaris es prendran els valors de 100* $\mu/m^3$ *per a O3 i de 120* $\mu/m^3$ *per a NO2. Tant per a PM10 i SO2, es prendran com a referència únicament els valors mitjans diaris per a comparar.*
+
+### 1.1. Estudi comparatiu entre estacions
+
+*a) Estudi dels valors mitjans i màxims diaris de cada contaminant. Per a cadascuna de les estacions de monitorització, es calcularan els valors màxims i mitjans diaris de cada contaminant. Posteriorment es farà una comparativa entre les cinc estacions sobre la base d'aquests valors. Interpreteu tenint en compte els límits esmentats anteriorment.*
+
+Es carreguen les dades i s'adapta el tipus de dades en algunes variables.
+
+```{r load_data}
+Air <- read.csv("dat_Air_Stations.csv")
+Air$Estacion<-as.factor(Air$Estacion)
+Air$Nombre<-as.factor(Air$Nombre)
+Air$Fecha<-as.Date(Air$Fecha, format = "%d/%m/%Y")
+```
+
+S'agrupen les dades per *Nombre* i *Fecha* per a poder agregar resultats i extreure el màxim i el promig diari per cada estació per a tots els contaminants del dataset.
+
+```{r E11a1}
+daily_max<-Air %>%
+  group_by(Nombre, Fecha) %>%
+  summarise_at(vars(SO2:PM25), max)
+
+daily_mean<-Air %>%
+  group_by(Nombre, Fecha) %>%
+  summarise_at(vars(SO2:PM25), mean)
+```
+
+Es grafiquen les dades de cada contaminant en format boxplot separant per colors les estacions de lectura. També s'afegeixen els límits proporcionats per als contaminants, tant per la lectura de promig com per la lectura de màxim diari.
+
+```{r E11a2, echo=FALSE, fig.height=7.5, warning=FALSE}
+g1<-ggplot(data=daily_mean, aes(x=Nombre, y=PM10, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=45), color="red") +
+  labs(title = "Mitjana diaria PM10", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.direction = "vertical", legend.position = "bottom")
+g2<-ggplot(data=daily_mean, aes(x=Nombre, y=SO2, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=40), color="red") +
+  labs(title = "Mitjana diaria SO2", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+g3<-ggplot(data=daily_mean, aes(x=Nombre, y=NO2, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=25), color="red") +
+  labs(title = "Mitjana diaria NO2", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+g4<-ggplot(data=daily_mean, aes(x=Nombre, y=O3, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=60), color="red") +
+  labs(title = "Mitjana diaria O3", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+g5<-ggplot(data=daily_max, aes(x=Nombre, y=NO2, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=120), color="red") +
+  labs(title = "Màxim diari NO2", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+g6<-ggplot(data=daily_max, aes(x=Nombre, y=O3, color=Nombre)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=100), color="red") +
+  labs(title = "Màxim diari O3", y="concentració") +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+leg<-get_legend(g1)
+ggarrange(g1,g2,g3,g4,g5,g6,ncol=2, nrow = 3, legend = "none") %>%
+gridExtra::grid.arrange(get_legend(g1), heights=unit(c(150,40),"mm"))
+```
+\newpage
+
+Per obtenir informació de la estacionalitat es grafiquen els valors promig i màxim de cada contaminant per data.
+
+```{r E11a2b, echo=FALSE, fig.height=8, warning=FALSE}
+g1<-ggplot(data=daily_mean, aes(x=Fecha, y=PM10, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=45), color="red") +
+  labs(title = "Mitjana diaria PM10", y="concentració") +
+  theme(legend.direction = "vertical", legend.position = "bottom")
+g2<-ggplot(data=daily_mean, aes(x=Fecha, y=SO2, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=40), color="red") +
+  labs(title = "Mitjana diaria SO2", y="concentració") +
+  theme(legend.position = 'none')
+g3<-ggplot(data=daily_mean, aes(x=Fecha, y=NO2, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=25), color="red") +
+  labs(title = "Mitjana diaria NO2", y="concentració") +
+  theme(legend.position = 'none')
+g4<-ggplot(data=daily_mean, aes(x=Fecha, y=O3, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=60), color="red") +
+  labs(title = "Mitjana diaria O3", y="concentració") +
+  theme(legend.position = 'none')
+g5<-ggplot(data=daily_max, aes(x=Fecha, y=NO2, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=120), color="red") +
+  labs(title = "Màxim diari NO2", y="concentració") +
+  theme(legend.position = 'none')
+g6<-ggplot(data=daily_max, aes(x=Fecha, y=O3, color=Nombre)) +
+  geom_point(alpha=1/3) +
+  geom_hline(aes(yintercept=100), color="red") +
+  labs(title = "Màxim diari O3", y="concentració") +
+  theme(legend.position = 'none')
+leg<-get_legend(g1)
+ggarrange(g1,g2,g3,g4,g5,g6,ncol=2, nrow = 3, legend = "none") %>%
+gridExtra::grid.arrange(get_legend(g1), heights=unit(c(150,40),"mm"))
+```
+\newpage
+S'estudia el nombre de dies en que el valor promig diari dels contaminants definits (PM10, SO2, NO2 i O3) està per sobre del límit establert, per cada estació d'enregistrament.
+
+```{r E11a3}
+res_mean<-daily_mean %>%
+  ungroup() %>%
+  group_by(Nombre) %>%
+  summarise(
+    d_PM10_mean = sum(PM10>45, na.rm = TRUE),
+    d_SO2_mean = sum(SO2>40, na.rm = TRUE),
+    d_NO2_mean = sum(NO2>25, na.rm = TRUE),
+    d_O3_mean = sum(O3>60, na.rm = TRUE)
+  )
+
+kable(res_mean, caption = "Dies amb promig diari superior al límit")
+```
+
+S'estudia el nombre de dies en que el valor màxim diari dels contaminants definits (O3 i NO2) està per sobre del límit, per cada estació d'enregistrament.
+
+```{r E11a4}
+res_max<-daily_max %>%
+  ungroup() %>%
+  group_by(Nombre) %>%
+  summarise(
+    d_NO2_max = sum(NO2>120, na.rm = TRUE),
+    d_O3_max = sum(O3>100, na.rm = TRUE)
+  )
+
+kable(res_max, caption = "Dies amb màxim diari superior al límit")
+```
+
+Prenent la informació dels boxplots i de les taules resum s'observa clarament que existeixen problemes **greus** de compliment amb els límits per als contaminants:
+
+* NO2 en el valor de la mitja diària
+* O3 en el valor de la mitja diària
+* O3 en el valor màxim diari
+
+i problemes **moderats** en el compliment per als contaminants:
+
+* PM10 en el valor de la mitja diària
+
+*b) Representeu gràficament l'evolució de cadascun dels contaminants en cada estació. Es prendran els valors màxims diaris.*
+
+```{r E11b1}
+daily_max_Long<-daily_max %>%
+  select(Nombre:PM10) %>%
+  pivot_longer(cols = SO2:PM10, names_to = "Contaminantes", values_to = "valor") %>%
+  ungroup()
+```
+
+```{r E11b2, echo=FALSE, fig.height=7, warning=FALSE}
+dml_EAA<-filter(daily_max_Long, Nombre == "Estacion Avenida Argentina")
+g1<-ggplot(data=dml_EAA, aes(x=Fecha, y=valor, color=Contaminantes)) +
+  geom_line() +
+  labs(title = "Estacion Avenida Argentina") +
+  scale_y_continuous(name="concentració", limits=c(0,400)) +
+  theme(legend.position = 'none')
+
+dml_EAC<-filter(daily_max_Long, Nombre == "Estacion Avenida Castilla")
+g2<-ggplot(data=dml_EAC, aes(x=Fecha, y=valor, color=Contaminantes)) +
+  geom_line() +
+  labs(title = "Estacion Avenida Castilla", y="concentració") +
+  scale_y_continuous(name="concentració", limits=c(0,400)) +
+  theme(legend.position = 'none')
+
+dml_EACo<-filter(daily_max_Long, Nombre == "Estacion Avenida Constitucion")
+g3<-ggplot(data=dml_EACo, aes(x=Fecha, y=valor, color=Contaminantes)) +
+  geom_line() +
+  labs(title = "Estacion Avenida Constitucion", y="concentració") +
+  scale_y_continuous(name="concentració", limits=c(0,400)) +
+  theme(legend.position = 'none')
+
+dml_EAHF<-filter(daily_max_Long, Nombre == "Estacion Avenida Hermanos Felgueroso")
+g4<-ggplot(data=dml_EAHF, aes(x=Fecha, y=valor, color=Contaminantes)) +
+  geom_line() +
+  labs(title = "Estacion Avenida Hermanos Felgueroso", y="concentració") +
+  scale_y_continuous(name="concentració", limits=c(0,400)) +
+  theme(legend.position = 'none')
+
+dml_EdM<-filter(daily_max_Long, Nombre == "Estacion de Montevil")
+g5<-ggplot(data=dml_EdM, aes(x=Fecha, y=valor, color=Contaminantes)) +
+  geom_line() +
+  labs(title = "Estacion de Montevil", y="concentració") +
+  scale_y_continuous(name="concentració", limits=c(0,400)) +
+  theme(legend.position = 'none')
+
+ggarrange(g1,g2,g3,g4,g5, ncol=2, nrow = 3, common.legend = TRUE, legend = "bottom")
+```
+\newpage
+*c) Estudi de correlació lineal. Per a això se seleccionen les dues estacions amb registres meteorològics: Estació de Montevil i Estació Avinguda Constitució. Per a cadascuna de les estacions, calcular la matriu de correlació entre els contaminants citats anteriorment i les variables meteorològiques: Temperatura (TMP), Humitat Relativa (HR), Radiació solar (RS), velocitat del vent (vv), precipitacions (LL) i Pressió baromètrica (PRB).Interpreteu.*
+
+*Nota: La matriu de correlació serà calculada sobre la base dels valors màxims de cada contaminant.*
+
+*Nota2: El motiu d'aquests primers apartats és prendre un primer contacte sobre les possibles diferències entre estacions, així com fer-se una idea de les relacions existents entre les variables, però per a construir els models de regressió es prendran les dades per hora.*
+
+```{r E11c1}
+#desagrupem les dades
+daily_max<-ungroup(daily_max)
+#filtrem per E.Montevil i obtenim correlació
+dm_Montevil<-daily_max %>% 
+  filter(Nombre=="Estacion de Montevil") %>%
+  select(PM10, SO2, NO2, O3, TMP, HR, RS, vv, LL, PRB)
+cor_Montevil<-cor(dm_Montevil, use = "pairwise.complete.obs")
+kable(cor_Montevil, caption = "Matriu de correlació - Montevil", digits = 2)
+```
+```{r E11c1b, echo=FALSE, fig.height=3}
+corrplot(cor_Montevil)
+```
+
+\newpage
+Per l'estació de Montevil, s'observen certs nivells de correlació positiva entre les variables:
+
+* PM10, SO2 i NO2
+* O3 i RS
+
+Així com certs nivells de correlació negativa entre les variables:
+
+* PM10 i LL
+* NO2, TMP i HR
+* O3 i PRB
+
+```{r E11c2}
+#filtrem per E.Constitució i obtenim correlació
+dm_Constitucio<-daily_max %>% 
+  filter(Nombre=="Estacion Avenida Constitucion") %>%
+  select(PM10, SO2, NO2, O3, TMP, HR, RS, vv, LL, PRB)
+cor_Constitucio<-cor(dm_Constitucio, use="pairwise.complete.obs")
+kable(cor_Constitucio, caption = "Matriu de correlació - Constitució", digits = 2)
+```
+```{r E11c2b, echo=FALSE, fig.height=3}
+corrplot(cor_Constitucio)
+```
+
+Per l'estació d'Avinguda Constitució, s'observen certs nivells de correlació positiva entre les variables:
+
+* PM10, SO2 i NO2
+* O3, RS i vv
+
+\newpage
+Així com certs nivells de correlació negativa entre les variables:
+
+* PM10 i vv
+* NO2, TMP, HR i RS
+
+### 1.2. Model de regressió lineal
+
+*Com he esmentat a dalt, per a construir els models de regressió, es prendran els valors de les variables triades per hora, tal com apareixen en la base de dades original.*
+
+*a) Es demana crear un model de regressió lineal, prenent com a variable dependent (O3) i variable explicativa (NO2). S'avaluarà la bondat de l'ajust, a partir del coeficient de determinació. Interpreteu.*
+
+```{r E12a1}
+model_O3<-lm(O3~NO2, Air)
+summary(model_O3)
+```
+
+El coeficient de determinació ajustat és `r round(summary(model_O3)$adj.r.squared,4)`, fet que implica que menys de la meitat de la variança de les dades és explicada pel model, per tant podem concloure que la bondat de l'ajust és certament força limitada.
+
+Aquest fet es pot refermar amb l'observació de la representació gràfica de les dades i la recta de regressió següent.
+
+```{r E12a2, echo=FALSE, fig.height=2.6, message=FALSE, warning=FALSE}
+ggplot(data=Air, aes(x=NO2, y=O3), color="black") +
+  geom_point(alpha=1/10) +
+  stat_smooth(method = "lm", colour="red") +
+  scale_y_continuous(limits=c(0,150)) 
+```
+
+Graficant els valors ajustats pel model enfront els residus s'obté el següent:  
+
+```{r E12a3, echo=FALSE, fig.height=2.6, message=FALSE, warning=FALSE}
+model_fit<-data.frame(fit=model_O3$fitted.values,
+                      res=model_O3$residuals,
+                      NO2=model_O3$model$NO2)
+g1<-ggplot(data=model_fit, aes(x=fit, y=res), color="black") +
+  geom_point(alpha=1/10)
+g2<-ggplot(data=model_fit, aes(x=NO2, y=res), color="black") +
+  geom_point(alpha=1/10)
+ggarrange(g1,g2,ncol=2)
+```
+
+La forma triangular del gràfic de residus enfront els valors ajustats s'explica per la aplicació del model sobre el set de dades amb les següents característiques:
+
+* Els valors de concentració de NO2 en les dades originals pertanyen a l'interval [0, INF).
+* Els valors de concentració de O3 en les dades originals pertanyen a l'interval [0, INF).
+* En les dades originals, podem tenir concentracions de O3 ~ 0, per a concentracions de NO2 en l'interval ~(10, 125)
+
+
+*b) S'afegeix al model anterior el nom de les estacions (Nom). Interpreteu*.
+
+```{r E12b1}
+model_O3_u<-update(model_O3, .~. + Nombre, Air)
+summary(model_O3_u)
+```
+
+El coeficient de determinació és ara `r round(summary(model_O3_u)$adj.r.squared,4)` quan anteriorment era `r round(summary(model_O3)$adj.r.squared,4)`, fet que indica que la introducció de la variable *nom* millora el model, però no de manera notable.
+
+```{r E12b2}
+#obtenim coeficients dels dos models
+c1<-data.frame(model=model_O3$coefficients)
+c2<-data.frame(model_updated=model_O3_u$coefficients)
+#ajuntem en un únic dataframe
+model_O3_summary<-merge(c1, c2, by="row.names", all = "TRUE")
+kable(model_O3_summary, caption = "Comparativa coeficients models O3")
+```
+
+Si comparem els coeficients estimates dels dos models; l'inicial i l'actualitzat observem que la introducció de la variable categòrica *Nombre* gairebé no modifica els coeficients de les variables en el model inicial. Aquest fet suporta la afirmació anteriorment realitzada que la introducció de la nova variable no modifica/millora notablement el model.
+
+Addicionalment observem que la introducció de la variable nom, donat que es tracta d'una variable tipus *factor* ha fet que el programa generi variables *dummy* per a representar cada un dels possibles nivells de la variable. Observem també que tot i tenir 5 possibles nivells en la variable *Nombre*, el model només introdueix 4 nivells, deixant *Estacion Avenida Argentina* fora. Evidentment, com que la variable *Nombre* només pot prendre 5 valors, per a aquelles observacions on les 4 variables relacionades amb el *Nombre* siguin 0, s'assumirà que es tracta del nivell restant o referència. Aquesta manera de procedir garanteix que no hi hagi problemes de multicolinealitat.
+
+Finalment Observant el t-value (`r round(summary(model_O3_u)$coefficients[5,3],4)`) i el p-valor (`r round(summary(model_O3_u)$coefficients[5,4],4)`) de la variable *NombreEstacion Avenida Hermanos Felgueroso* podem afirmar que aquesta variable no és estadísticament rellevant i es podria treure del model.
+
+### 1.3. Model de regressió lineal múltiple
+*Es vol construir un model de regressió múltiple amb el qual puguem predir la concentració d'ozó (O3) en les zones de Montevil i Avinguda de la Constitució.*
+
+*a) Es demana dos models (un per a cada estació) prenent com a variable dependent el nivell d'ozó (O3) en funció de la concentració de diòxid de nitrogen (NO2) i diferents variables meteorològiques com vv (velocitat del vent), RS (radiació solar), HR (humitat relativa) i LL (precipitacions).*
+
+\newpage
+**Estació de Montevil**
+
+```{r E13a1}
+#filtrem dades Montevil i generem model
+Air_Montevil<-Air %>% 
+  filter(Nombre=="Estacion de Montevil") %>%
+  select(PM10, SO2, NO2, O3, TMP, HR, RS, vv, LL, PRB)
+model_O3_m_Montevil<-lm(O3~NO2+vv+RS+HR+LL, Air_Montevil)
+summary(model_O3_m_Montevil)
+```
+
+**Estació Avinguda de la constitució**
+
+```{r E13a2}
+#filtrem dades Constitució i generem model
+Air_Constitucio<-Air %>% 
+  filter(Nombre=="Estacion Avenida Constitucion") %>%
+  select(PM10, SO2, NO2, O3, TMP, HR, RS, vv, LL, PRB)
+model_O3_m_Constitucio<-lm(O3~NO2+vv+RS+HR+LL, Air_Constitucio)
+summary(model_O3_m_Constitucio)
+```
+
+*b) S'afegeix als models anteriors la variable Temperatura (TMP). De ser necessari, es demana comprovar la presència o no de colinealitat entre les variables (vv) i (TMP). Podeu usar la llibreria (faraway) i estudiar el FIV (factor d'inflació de la variància). Discutiu si seria indicat o no afegir la variable (TMP) a cadascun dels models.*
+
+**Estació de Montevil**
+
+```{r E13b1}
+model_O3_m_Montevil_2<-update(model_O3_m_Montevil, .~. + TMP, Air_Montevil)
+summary(model_O3_m_Montevil_2)
+```
+\newpage
+Inicialment s'analitza la correlació entre les diferents variables del model actualitzat.
+
+```{r E13b2}
+cor_Montevil<-cor(Air_Montevil[c("NO2","vv","RS","HR","LL","TMP")],
+                  use = "pairwise.complete.obs")
+kable(cor_Montevil, caption = "Matriu de correlació - Montevil", digits = 2)
+```
+
+A través de la taula de correlació s'observa que no existeix correlació forta entre cap parell de variables independents utilitzades en la definició del model. Tanmateix, a continuació s'analitzen els coeficients del model inicial i del model actualitzat buscant canvis substancials.
+
+```{r E13be}
+#obtenim coeficients dels dos models
+c1<-data.frame(model=model_O3_m_Montevil$coefficients)
+c2<-data.frame(model_updated=model_O3_m_Montevil_2$coefficients)
+#ajuntem en un únic dataframe
+model_O3_montevil_summary<-merge(c1, c2, by="row.names", all = "TRUE")
+kable(model_O3_montevil_summary, caption = "Comparativa coeficients models Montevil")
+```
+
+Es pot concloure que la introducció de la variable *TMP* no produeix canvis significatius en els coeficients de les altres variables, comparant el model de regressió inicial amb l'actualitzat.
+
+Com a darrer pas, s'analitza el factor d'inflació de la variança.
+
+```{r E13b4, warning=FALSE}
+vif(model_O3_m_Montevil_2)
+```
+Amb l'anàlisi del factor d'inflació de la variança podem afirmar que no hi ha presencia de colinealitat, doncs tots els factors retornats per a les diferents variables independents son relativament propers a la unitat.
+\newpage
+Finalment, es pot concloure que la introducció de la variable *TMP* en el model per a la Estació de Montevil:
+
+* Millora lleugerament el model doncs el coeficient de determinació ajustat creix de `r round(summary(model_O3_m_Montevil)$adj.r.squared,4)` a `r round(summary(model_O3_m_Montevil_2)$adj.r.squared,4)`.
+* Redueix lleugerament l'error de predicció de `r round(sqrt(deviance(model_O3_m_Montevil)/df.residual(model_O3_m_Montevil)),2)` a `r round(sqrt(deviance(model_O3_m_Montevil_2)/df.residual(model_O3_m_Montevil_2)),2)`
+* Es considera estadísticament significativa doncs el P-valor per a la variable*TMP* és `r summary(model_O3_m_Montevil_2)$coefficients[7,4]`
+* No presenta un alt grau de correlació amb altres variables independents utilitzades en el model.
+* No presenta colinealitat
+
+Amb les conclusions anteriors la variable *TMP* es podria incloure en el model per a la Estació de Montevil.
+
+**Estació Avinguda de la Constitució**
+
+```{r E13b5}
+model_O3_m_Constitucio_2<-update(model_O3_m_Constitucio, .~. + TMP, Air_Constitucio)
+summary(model_O3_m_Constitucio_2)
+```
+Anàlogament a l'anàlisi realitzat per l'estació de Montevil, per a l'estació d'Avinguda de la Constitució s'analitza la correlació entre les diferents variables del model actualitzat
+
+```{r E13b6}
+cor_Constitucio<-cor(Air_Constitucio[c("NO2","vv","RS","HR","LL","TMP")],
+                     use = "pairwise.complete.obs")
+kable(cor_Constitucio, caption = "Matriu de correlació - Constitució", digits = 2)
+```
+Novament, s'observa que no existeix correlació forta entre cap parell de variables independents utilitzades en la definició del model. Tanmateix, a continuació s'analitzen els coeficients del model inicial i del model actualitzat buscant canvis substancials.
+
+```{r E13b7}
+#obtenim coeficients dels dos models
+c1<-data.frame(model=model_O3_m_Constitucio$coefficients)
+c2<-data.frame(model_updated=model_O3_m_Constitucio_2$coefficients)
+#ajuntem en un únic dataframe
+model_O3_constitucio_summary<-merge(c1, c2, by="row.names", all = "TRUE")
+kable(model_O3_constitucio_summary, caption = "Comparativa coeficients models Constitucio")
+```
+
+Es pot concloure que la introducció de la variable *TMP* no produeix canvis significatius en els coeficients de les altres variables, comparant el model de regressió inicial amb l'actualitzat.
+
+Com a darrer pas, s'analitza el factor d'inflació de la variança.
+
+```{r E13b8, warning=FALSE}
+vif(model_O3_m_Constitucio_2)
+```
+
+Novament, a través de l'anàlisi del factor d'inflació de la variança també podem afirmar que en aquest cas tampoc hi ha presencia de colinealitat, doncs tots els factors retornats per a les diferents variables independents son relativament propers a la unitat.
+
+Finalment, es pot concloure que la introducció de la variable *TMP* en el model de regressió múltiple per a l'estació d'Avinguda de la Constitució:
+
+* No millora el model doncs el coeficient de determinació ajustat decreix lleugerament de `r round(summary(model_O3_m_Constitucio)$adj.r.squared,4)` a `r round(summary(model_O3_m_Constitucio_2)$adj.r.squared,4)`.
+* L'error de predicció es manté constant a `r round(sqrt(deviance(model_O3_m_Constitucio)/df.residual(model_O3_m_Constitucio)),2)` (`r round(sqrt(deviance(model_O3_m_Constitucio_2)/df.residual(model_O3_m_Constitucio_2)),2)` per al model actualitzat)
+* No es considera estadísticament significativa doncs el P-valor és `r summary(model_O3_m_Constitucio_2)$coefficients[7,4]`
+
+Amb les conclusions anteriors la variable *TMP* no s'hauria d'incloure en el model per a la Estació d'Avinguda de la Constitució.
+
+### 1.4. Diagnosi del model
+
+*Per a la diagnosi es tria l'últim model construït per a l'estació de Montevil i es demanen dos gràfics: un amb els valors ajustats enfront dels residus (que ens permetrà veure si la variància és constant) i el gràfic quantil-quantil que compara els residus del model amb els valors d'una variable que es distribueix normalment(QQplot). Interpreteu els resultats.*
+\newpage
+```{r E14a, fig.height=3.8}
+model_fit<-data.frame(fit=model_O3_m_Montevil_2$fitted.values,
+                      res=model_O3_m_Montevil_2$residuals,
+                      NO2=model_O3_m_Montevil_2$model$NO2,
+                      vv=model_O3_m_Montevil_2$model$vv,
+                      RS=model_O3_m_Montevil_2$model$RS,
+                      HR=model_O3_m_Montevil_2$model$HR,
+                      LL=model_O3_m_Montevil_2$model$LL,
+                      TMP=model_O3_m_Montevil_2$model$TMP)
+ggplot(data=model_fit, aes(x=fit, y=res), color="black") +
+  geom_point(alpha=1/10)
+```
+
+El gràfic de valors ajustats enfront els residus mostra dos comportaments diferenciats de les dades. Un comportament lineal d'un grup de punts entre les coordenades (-25, 30) i (40, -40) i un comportament aleatori general en la resta del gràfic. 
+
+Aquest comportament ja s'ha observat en la regressió lineal simple realitzada amb entre les variables O3~NO2 i com s'ha explicat anteriorment es deu principalment al fet que en les dades originals tenim valors de concentració de O3~0 per a tot l'interval de valors de concentració de NO2. 
+
+Per analitzar millor els residus, es procedeix a graficar-los enfront cada una de les variables independents del model i observar si existeixen relacions en la variança.
+
+```{r E14b, echo=FALSE, fig.height=5, message=FALSE, warning=FALSE}
+g1<-ggplot(data=model_fit, aes(x=NO2, y=res), color="black") +
+  geom_point(alpha=1/10) +
+  geom_hline(aes(yintercept=0), color="grey10")
+g2<-ggplot(data=model_fit, aes(x=vv, y=res), color="black") +
+  geom_point(alpha=1/10) +
+  geom_hline(aes(yintercept=0), color="grey10")
+g3<-ggplot(data=model_fit, aes(x=RS, y=res), color="black") +
+  geom_point(alpha=1/10) +
+  geom_hline(aes(yintercept=0), color="grey10")
+g4<-ggplot(data=model_fit, aes(x=HR, y=res), color="black") +
+  geom_point(alpha=1/10) +
+  geom_hline(aes(yintercept=0), color="grey10")
+g5<-ggplot(data=model_fit, aes(x=LL, y=res), color="black") +
+  geom_point(alpha=1/10) +
+  geom_hline(aes(yintercept=0), color="grey10")
+g6<-ggplot(data=model_fit, aes(x=TMP, y=res), color="black") +
+  geom_point(alpha=1/10)+
+  geom_hline(aes(yintercept=0), color="grey10")
+ggarrange(g1, g2, g3, g4, g5, g6, ncol = 2, nrow = 3)
+```
+En base als gràfics anteriors s'observen distribucions aleatòries i aproximadament simètriques al voltant de l'eix d'abscisses (línia residus = 0) en els gràfics de residus enfront les variables *vv*, *RS*, *HR*, *LL* i *TMP*. 
+
+Per altra banda, s'observa una distribució no aleatòria en part del gràfic de residus enfront *NO2* que ja ha estat explicada anteriorment (veure 1.2. Model de regressió lineal simple)
+
+
+Per finalitzar, el gràfic quantil-quantil de la següent pàgina mostra que els residus segueixen una distribució aproximadament normal, especialment en la zona central de dades, amb cues pesades o amb una freqüència més elevada que una distribució normal.
+
+```{r E14c, fig.height=4}
+qqnorm(model_O3_m_Montevil_2$residuals)
+qqline(model_O3_m_Montevil_2$residual)
+```
+
+### 1.5. Predicció del model
+
+*Segons el model de l'apartat anterior, calculeu la concentració d'O3, si es tenen valors de NO2 de 40, vv de 2, RS de 100, HR de 80, LL de 0.10 i TMP de 25.*
+
+```{r E15}
+predict(model_O3_m_Montevil_2, newdata = data.frame(NO2=40, vv=2, RS=100,
+                                                    HR=80, LL=0.1, TMP=25))
+```
+
+La concentració d'O3 en la estació de Montevil estimada pel model per als valors indicats a l'anunciat és `r round(predict(model_O3_m_Montevil_2, newdata = data.frame(NO2=40, vv=2, RS=100, HR=80, LL=0.1, TMP=25)),2)`$\mu/m^3$.
+
+## 2. Regressió logística
+
+*Per a construir les noves variables i els models de regressió logística, es prendran els valors de les variables triades per hora, tal com apareixen en la base de dades original. En aquest apartat es prendran com a contaminants la concentració de PM10 i d'O3. Es procedirà a calcular els índexs de qualitat (icPM10 i icO3) de la forma següent:*
+
+* *PM10 re-codificada: (icPM10)*
+  + *acceptable: valors de (0 a 45],*
+  + *millorable: valors de (45 a 180]*
+
+
+* *O3 re-codificada: (ic03)*
+  + *acceptable: valors de (0 a 60],*
+  + *millorable: valors de (60 a 170]*
+
+
+* *RS re-codificada (RS_re):*
+  + *normal_baixa:(0 a 100],*
+  + *normal_alta: valors de (100 a 700]*
+
+*Nota: Aquest índex de qualitat s'ha re-codificat conforme a les nostres dades.*
+
+```{r E2}
+#recodificacio de dades
+Air$icPM10<-as.factor(ifelse(Air$PM10>0 & Air$PM10<=45,"acceptable",
+                              ifelse(Air$PM10>45 & Air$PM10<=180,"millorable",NA)))
+Air$icO3<-as.factor(ifelse(Air$O3>0 & Air$O3<=60,"acceptable",
+                              ifelse(Air$O3>60 & Air$O3<=170,"millorable",NA)))
+Air$RS_re<-as.factor(ifelse(Air$RS>0 & Air$RS<=100,"normal_baixa",
+                              ifelse(Air$RS>100 & Air$RS<=700,"normal_alta",NA)))
+```
+
+### 2.1. Anàlisi cru de possibles factors de risc. Cáculo de OR
+
+*Es crearà una nova variable amb els mesos de l'any a partir de la variable Data, anomenada month*.
+
+```{r E21}
+Air$month<-as.factor(month(Air$Fecha))
+Air_M<-Air[Air$Nombre=="Estacion de Montevil",]
+```
+
+*a) Es calcularà les OR (Odds-Ràtio) entre cadascuna de les variables dependents i les variables explicatives en l'estació de Montevil. Important: Per al càlcul de les OR, es partirà de la taula de contingència i es calcularà a partir de la seva fórmula. Heu d'implementar aquesta fórmula en R. Es pot considerar que la radiació solar i el mes de l'any són factors de risc? Justifica la teva resposta i interpreta les OR.*
+
+```{r E21a1}
+odds_fun<-function(x,y){
+#x = variable explicativa // y = variable dependent
+  
+#Taula de contingència
+tc<-table(y,x)
+tc<-cbind(tc,rowSums(tc))
+colnames(tc)[ncol(tc)]<-"sum_row"
+tc<-rbind(tc,colSums(tc))
+rownames(tc)[nrow(tc)]<-"sum_col"
+
+#Taula de percentatges
+tp<-tc
+for (i in 1:nrow(tc)-1){
+  tp[i,]<-tc[i,]/tc[nrow(tc),]
+  rownames(tp)[i]<-paste(rownames(tc)[i], "%", sep = " ")
+}
+tp<-tp[,1:ncol(tp)-1]
+tp<-tp[1:nrow(tp)-1,]
+
+#Taula odds - variable dependent
+#millorable sobre acceptable
+to<-tp
+for (i in 1:nrow(tp)-1){
+  to[i,]<-tp[nrow(tp),]/tp[i,]
+}
+to<-to[1:nrow(tp)-1,]
+
+reference_odd<-to[1]
+#Array d'odds - variable explicativa
+#Months sobre gener // normal_baixa sobre normal_alta
+ao<-to/reference_odd
+ao<-ao[-1]
+return(ao)
+}
+```
+
+```{r E21a2}
+#millorable sobre acceptable icPM10 i radiació baixa sobre alta
+odds<-odds_fun(Air_M$RS_re, Air_M$icPM10)
+odds
+```
+
+**NOTA:** Per millorar la interpretació dels resultats, quan s'analitzi la variable *radiació solar* calcularem la inversa del resultat de la funció *odds_fun*. D'aquesta manera estarem analitzant la proporció de radiació solar alta, sobre radiació solar baixa, fet que millora la comprensió dels resultats.
+
+```{r E21a3}
+#millorable sobre acceptable icPM10 i radiació alta sobre baixa
+1/unname(odds)
+```
+Si considerem com a factor la radiació solar alta, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icPM10, és de `r round(1/odds_fun(Air_M$RS_re, Air_M$icPM10),2)` vegades respecte al cas amb radiació solar baixa. Per tant, la radiació solar alta no és un factor de risc per a la concentració de icPM10 doncs el odd-ratio és inferior a 1.
+
+```{r E21a4}
+#millorable sobre acceptable icPM10 i mesos sobre gener
+odds<-odds_fun(Air_M$month, Air_M$icPM10)
+odds
+```
+
+Quan estem al mes d'Abril, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icPM10, és de `r round(odds_fun(Air_M$month, Air_M$icPM10)[3],2)` vegades respecte al Gener, per tant la proporció és un `r round((odds_fun(Air_M$month, Air_M$icPM10)[3]-1)*100, 2)`% major al mes d'Abril que el mes de Gener.
+
+Els mesos d'Abril, Maig, Setembre, Octubre, Novembre i Desembre es poden considerar factor de risc (comparant amb Gener) per a icPM10 doncs observem valors de *odds-ratio* superiors a la unitat.
+
+```{r E21a5}
+#millorable sobre acceptable O3 i radiació alta sobre baixa
+odds<-odds_fun(Air_M$RS_re, Air_M$icO3)
+1/unname(odds)
+```
+
+Quan la radiació solar és alta, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icO3, és de `r round(1/odds_fun(Air_M$RS_re, Air_M$icO3),2)` vegades respecte al cas amb radiació solar baixa. La radiació solar alta clarament és un factor de risc per a l'índex icO3.
+
+```{r E21a7}
+#millorable sobre acceptable O3 i mesos sobre gener
+odds<-odds_fun(Air_M$month, Air_M$icO3)
+odds
+```
+Quan estem al mes de Maig, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icO3, és de `r round(odds_fun(Air_M$month, Air_M$icO3)[4],2)` vegades respecte al Gener. Els mesos de febrer a Octubre son factors de risc per a icO3 (prenent com a referencia el mes de Gener).
+\newpage
+*b) Idem per a l’estació d’Avinguda Constitució.*
+
+```{r E21b1}
+Air_C<-Air[Air$Nombre=="Estacion Avenida Constitucion",]
+
+#millorable sobre acceptable icPM10 i radiació alta sobre baixa
+odds<-odds_fun(Air_C$RS_re, Air_C$icPM10)
+1/unname(odds)
+```
+
+Si considerem com a factor la radiació solar alta, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icPM10, és de `r round(1/odds_fun(Air_C$RS_re, Air_C$icPM10),2)` vegades respecte al cas amb radiació solar baixa. Per tant, la radiació solar alta no és un factor de risc en l'estació d'Avinguda Constitució per a la concentració de icPM10 doncs el *odd-ratio* és inferior a 1.
+
+```{r E21b2}
+#millorable sobre acceptable icPM10 i mesos sobre gener
+odds<-odds_fun(Air_C$month, Air_C$icPM10)
+odds
+```
+
+Quan estem al mes de Desembre, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icPM10, és de `r round(odds_fun(Air_C$month, Air_C$icPM10)[11],2)` vegades respecte al Gener, per tant la proporció és un `r round((odds_fun(Air_C$month, Air_C$icPM10)[11]-1)*100, 2)`% major al mes de Desembre que el mes de Gener.
+
+Els mesos d'Abril, Novembre i Desembre es poden considerar factor de risc, en comparació amb Gener per a icPM10 doncs observem valors de *odds-ratio* superiors a la unitat.
+
+```{r E21b3}
+#millorable sobre acceptable O3 i radiació alta sobre baixa
+odds<-odds_fun(Air_C$RS_re, Air_C$icO3)
+1/unname(odds)
+```
+
+Quan la radiació solar és alta, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icO3, és de `r round(1/odds_fun(Air_C$RS_re, Air_C$icO3),2)` vegades respecte al cas amb radiació solar baixa. La radiació solar alta és un factor de risc per a l'índex icO3.
+
+```{r E21b4}
+#millorable sobre acceptable O3 i mesos sobre Gener
+odds<-odds_fun(Air_C$month, Air_C$icO3)
+odds
+```
+
+Quan estem al mes d'Abril, la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icO3, és de `r round(odds_fun(Air_C$month, Air_C$icO3)[3],2)` vegades respecte al Gener. Els mesos de febrer a Octubre son factors de risc per a icO3 (prenent com a referència el mes de Gener) doncs tots mostren un *odd-ratio* superior a la unitat.
+
+\newpage
+### 2.2. Model de regressió logística
+*Per a l'estació de Montevil de l'apartat anterior:*
+
+*a) Es demana construir un model de regressió logística prenent com a variable dependent icPM10 i variables explicatives (RS_re), (vv) i (PRB). Interpreteu i calculeu les OR.*
+
+Inicialment es comproven els nivells assignats a les variables categòriques:
+
+```{r E22a1}
+#comprovació de nivells
+contrasts(Air_M$icPM10)
+contrasts(Air_M$icO3)
+contrasts(Air_M$RS_re)
+contrasts(Air_M$month)
+```
+
+La definició del model es realitza d'acord al següent:
+
+```{r E22a2}
+model_logist_icPM10<-glm(formula = icPM10~RS_re+vv+PRB, data = Air_M, 
+                         family = binomial(link = logit))
+summary(model_logist_icPM10)
+```
+
+A partir dels signes dels coeficients podem dir que quan la *RS_re* és normal_baixa (normal_baixa=1) i/o quan incrementa la velocitat del vent *vv* la probabilitat de tenir un dia millorable (millorable=1) en icPM10 es redueix doncs el signe del coeficient és negatiu, per altra banda, quan la pressió atmosfèrica *PRB* incrementa, la probabilitat d'obtenir un dia millorable també ho fa.
+
+L'estimació dels OR es realitza calculant l'exponencial dels coeficients obtinguts del model de regressió logistica.
+
+```{r E22a3}
+round(exp(coefficients(model_logist_icPM10)),4)
+```
+
+Així per la variable *RS_re* es té un OR de `r round(exp(coefficients(model_logist_icPM10)),4)[2]` fet que indica que la probabilitat de trobar un dia millorable, sobre un dia acceptable, pel que fa a icPM10 és de `r round(exp(coefficients(model_logist_icPM10)),2)[2]` vegades respecte al cas amb radiació solar alta, afirmació alineada amb l'explicació anterior relacionada amb el signe dels coeficients de la regressió. Pel que fa a la velocitat del vent es pot concloure que per cada unitat que incrementa la velocitat del vent l'odds d'obtenir un dia millorable és `r round(exp(coefficients(model_logist_icPM10)),2)[3]` vegades menor. D'aquesta manera, si la variable vent augmenta en 3 unitats l'odds serà `r round((exp(coefficients(model_logist_icPM10))[3])^3,2)` vegades menor.
+
+Com que icPM10 = millorable és pitjor (en termes de contaminació) podem resumir que la Radiació Solar baixa i l'increment del vent redueixen les probabilitats de que el dia sigui millorable, conseqüentment incrementen les probabilitats de que el dia sigui acceptable (menys contaminació).
+
+*b) S'afegeix al model de l'apartat anterior la variable (month). ¿Existeix una millora del model?. Justifiqueu i interpreteu.*
+
+```{r E22b}
+model_logist_icPM10_b<-update(model_logist_icPM10, .~.+month, data = Air_M,
+                              family = binomial(link = logit))
+summary(model_logist_icPM10_b)
+```
+
+L'AIC del model inicial és `r round(summary(model_logist_icPM10)$aic,2)` mentre que l'AIC del model actualitzat amb la variable *month* és `r round(summary(model_logist_icPM10_b)$aic,2)`, per tant com que l'AIC disminueix podem afirmar que la introducció de la variable *month* millora el model.
+
+Cal destacar que no totes les variables *dummy* generades a partir de la variable *month* són estadísticament significatives. Observant el valor de l'estadístic de Wald i el p-valor associat, podem afirmar que les variables *dummy* *month4*, *month5*, *month9*, *month10* i *month11* no són estadísticament significatives. 
+
+Conseqüentment les dades registrades en els mesos citats no produeixen canvis significatius en el resultat del model per efecte de la estacionalitat.. 
+
+*c) S'afegirà al model anterior com a variable explicativa la variable (TMP). Justifiqueu la presència o no d'una possible interacció amb (RS_re). Es podria estar davant una variable de confusió?. Raona la teva resposta.*
+
+```{r E22c1}
+model_logist_icPM10_c<-update(model_logist_icPM10_b, .~.+TMP, data = Air_M,
+                              family = binomial(link = logit))
+summary(model_logist_icPM10_c) 
+```
+
+Per Per analitzar la possible presència d'interacció es crea un model adicional afegint la interacció entre les variables *TMP* i *RS_re*.
+
+```{r E22c3}
+model_logist_icPM10_c_int<-update(model_logist_icPM10_c, .~.+RS_re:TMP, data = Air_M,
+                              family = binomial(link = logit))
+summary(model_logist_icPM10_c_int) 
+```
+
+S'observa que el terme d'interacció *RS_renormal_baixa:TMP* no és estadísticament significatiu doncs el p-valor associat al estadístic de wald és `r round(summary(model_logist_icPM10_c_int)$coefficients[17,4],4)`.
+
+Per analitzar si ens trobem davant una variable de confusió es comparen els paràmetres estimats dels dos models anteriors (amb i sense la variable *TMP*, sense el terme d'interacció).
+
+```{r E22c2}
+#obtenim coeficients dels dos models
+c1<-data.frame(model=model_logist_icPM10_b$coefficients)
+c2<-data.frame(model_updated=model_logist_icPM10_c$coefficients)
+#ajuntem en un únic dataframe
+model_logist_icPM10_summary<-merge(c1, c2, by="row.names", all = "TRUE")
+kable(model_logist_icPM10_summary,
+      caption = "Comparativa paràmetres estimats regressió logística")
+```
+
+\newpage
+S'observa que la introducció de la variable *TMP* modifica el paràmetre estimat per RS_renormal baixa doncs en el model inicial era `r round(model_logist_icPM10_summary[14,2],2)` i en el model actualitzat amb la variable *TMP* és de `r round(model_logist_icPM10_summary[14,3],2)`. També s'observen canvis en els paràmetres estimats per algunes de les variables *dummy* de *month*. 
+
+Per tant es pot afirmar que la variable *TMP* és una variable de confusió.
+
+### 2.3. Predicció
+
+*Segons el model de l’apartat b), calculeu la probabilitat que la concentració de PM10 sigui o no superior a 45, amb uns valors de vv= 0.6, RS_re=“Normal_alta”,PRB= 1013, el mes d’agost.*
+
+```{r E23}
+predict(model_logist_icPM10_b , newdata = data.frame(vv=0.6, RS_re="normal_alta",
+                                                     PRB=1013,month="8"),
+        type="response")
+```
+La probabilitat que l'index icPM10 sigui "millorable" (concentració PM10 $\ge$ 45) amb les dades proporcionades a l'enunciat és del `r round(predict(model_logist_icPM10_b , newdata = data.frame(vv=0.6, RS_re="normal_alta", PRB=1013,month="8"), type="response")*100,2)`%.
+
+### 2.4. Bondat de l’ajust
+
+*Fes servir el test de Hosman-Lemeshow per veure la bondat d'ajust, prenent el model de l'apartat b). El paquet ResourceSelection te la funció que aplica el test de Hosmer-Lemeshow.*
+
+```{r E24}
+hoslem.test(model_logist_icPM10_b$y, model_logist_icPM10_b$fitted.values)
+```
+
+El test d'Hosmer-Lemeshow realitza un contrast d'hipòtesis on $H_{0}$ indica que no hi ha diferencies entre els valors observats i els valors pronosticats. Observant els resultats del test s'obté un p-valor de `r hoslem.test(model_logist_icPM10_b$y, fitted(model_logist_icPM10_b))$p.value`, molt petit. Conseqüentment es rebutja l'hipòtesis nul·la i s'afirma que si existeixen diferencies entre els valors observats i els valors pronosticats pel model, per tant el model no està correctament ajustat.
+
+### 2.5. Corba ROC
+
+*Dibuixeu la corba ROC, i calculeu l'àrea sota la corba amb el model de l'apartat b). Discutir el resultat.*
+
+```{r E25a}
+prob<-predict(model_logist_icPM10_b, Air_M, type = "response")
+r<-roc(Air_M$icPM10, prob)
+plot(r)
+auc(r)
+```
+
+Amb els resultats d'àrea sota la corba és pot afirmar que el model té unes prestacions correctes, sense arribar a ser excel·lents.
+
+## 3. Conclusions de l’anàlisi
+*En aquest apartat s'han d'exposar les conclusions sobre la base dels resultats obtinguts a tot l'estudi. Regressió lineal i logística*
+
+**ANÀLISI DE DADES**
+
+L'anàlisi inicial de les dades mostra que existeixen problemes **greus** de compliment amb els límits per als contaminants:
+
+* NO2 en el valor de la mitja diària
+* O3 en el valor de la mitja diària
+* O3 en el valor màxim diari
+
+i problemes **moderats** en el compliment per als contaminants:
+
+* PM10 en el valor de la mitja diària
+
+També mostra que per a l'estació de Montevil existeixen certs nivells de correlació positiva entre les variables:
+
+* PM10, SO2 i NO2
+* O3 i RS
+
+\newpage
+Així com certs nivells de correlació negativa entre les variables:
+
+* PM10 i LL
+* NO2, TMP i HR
+* O3 i PRB 
+
+Mentre per l'estació d'Avinguda de la Constitució, existeixen certs nivells de correlació positiva entre les variables:
+
+* PM10, SO2 i NO2
+* O3, RS i vv
+
+Així com certs nivells de correlació negativa entre les variables:
+
+* PM10 i vv
+* NO2, TMP, HR i RS
+
+**REGRESSIÓ LINEAL**
+
+Realitzant regressió lineal simple entre les variables O3~NO2 s'obté un coeficient de determinació de `r round(summary(model_O3)$adj.r.squared,4)` i quan s'afegeix la variable *nom* el coeficient de determinació és de `r round(summary(model_O3_u)$adj.r.squared,4)` fet que indica que la introducció de la variable *nom* millora el model, però no de manera notable. 
+
+S'observa que la distribució dels residus en front dels valors ajustats no segueix un comportament aleatori, causat pel fet que no existeix una forta correlació entre les variables O3 i NO2 en les variables originals. És especialment destacable el fet de tenir concentracions properes a 0 en O3, per a tot l'interval de concentracions de NO2. 
+
+**REGRESSIÓ LINEAL MULTIPLE**
+
+Comparant els dos models de regressió lineal múltiple per a l'estació de Montevil es por concloure que la introducció de la variable *TMP* en el model:
+
+* Millora lleugerament el model doncs el coeficient de determinació ajustat creix de `r round(summary(model_O3_m_Montevil)$adj.r.squared,4)` a `r round(summary(model_O3_m_Montevil_2)$adj.r.squared,4)`.
+* Redueix lleugerament l'error de predicció de `r round(sqrt(deviance(model_O3_m_Montevil)/df.residual(model_O3_m_Montevil)),2)` a `r round(sqrt(deviance(model_O3_m_Montevil_2)/df.residual(model_O3_m_Montevil_2)),2)`
+* Es considera estadísticament significativa doncs el P-valor per a la variable*TMP* és `r summary(model_O3_m_Montevil_2)$coefficients[7,4]`
+* No presenta un alt grau de correlació amb altres variables independents utilitzades en el model.
+* No presenta colinealitat
+
+Amb les conclusions anteriors la variable *TMP* es podria incloure en el model per a la Estació de Montevil.
+
+Realitzant la mateixa comparació per a l'estació d'Avinguda de la Constitució s'obté que la introducció de la variable *TMP* en el model:
+
+* No millora el model doncs el coeficient de determinació ajustat decreix lleugerament de `r round(summary(model_O3_m_Constitucio)$adj.r.squared,4)` a `r round(summary(model_O3_m_Constitucio_2)$adj.r.squared,4)`.
+* L'error de predicció es manté constant a `r round(sqrt(deviance(model_O3_m_Constitucio)/df.residual(model_O3_m_Constitucio)),2)` (`r round(sqrt(deviance(model_O3_m_Constitucio_2)/df.residual(model_O3_m_Constitucio_2)),2)` per al model actualitzat)
+* No es considera estadísticament significativa doncs el P-valor és `r summary(model_O3_m_Constitucio_2)$coefficients[7,4]`
+
+Amb les conclusions anteriors la variable *TMP* no s'hauria d'incloure en el model per a la Estació d'Avinguda de la Constitució.
+
+Analitzant en profunditat les distribucions dels gràfics de residus per al model de regressió lineal múltiple (actualitzat amb la variable *TMP*)per a l'estació de Montevil s’observen:
+
+* Distribucions aleatòries i aproximadament simètriques al voltant de l’eix d’abscisses (línia residus = 0) en els gràfics de residus enfront les variables vv, RS, HR, LL i TMP.
+* Una distribució no aleatòria en el gràfic de residus enfront la variable NO2, prèviament explicat (REGRESSIÓ LINEAL).
+
+Finalment, el gràfic quantil-quantil mostra que els residus segueixen una distribució aproximadament normal, especialment en la zona central de dades, una freqüència més elevada en ambdues cues.
+\newpage
+
+**REGRESSIÓ LOGISTICA**
+
+L'anàlisi cru indica:
+
+* Estació de Montevil
+  + La radiació solar alta no és un factor de risc per a icPM10 (odds = `r round(1/odds_fun(Air_M$RS_re, Air_M$icPM10),2)`).
+  + Els mesos d’Abril, Maig, Setembre, Octubre, Novembre i Desembre es poden considerar factor de risc per a icPM10 prenent com a referència Gener.
+  + La radiació solar alta és un factor de risc per a icO3 (odds = `r round(1/odds_fun(Air_M$RS_re, Air_M$icO3),2)`).
+  + Els mesos de febrer a Octubre son factors de risc per a icO3 prenent com a referència Gener.
+* Estació d'Avinguda de la Constitució
+  + La radiació solar alta no és un factor de risc per a icPM10 (odds = `r round(1/odds_fun(Air_C$RS_re, Air_C$icPM10),2)`).
+  + Els mesos d’Abril, Novembre i Desembre es poden considerar factor de risc, en comparació amb Gener per a icPM10.
+  + La radiació solar alta és un factor de risc per a l’índex icO3 (odds = `r round(1/odds_fun(Air_C$RS_re, Air_C$icO3),2)`).
+  +  Els mesos de febrer a Octubre son factors de risc per a icO3 (prenent com a referència el mes de Gener)
+
+L'anàlisi dels odds-ratio a partir del primer model de regressió logística (icPM10~RS_re + vv + PRB) per a l'estació de Montevil ens indica:
+
+* Quan la radiació solar es baixa, la probabilitat de trobar un dia millorable sobre un dia acceptable, pel que fa a icPM10 és de `r round(exp(coefficients(model_logist_icPM10)),2)[2]` vegades respecte al cas amb radiació solar alta.
+* Per cada unitat que incrementa la velocitat del vent la probabilitat de tenir un dia millorable és `r round(exp(coefficients(model_logist_icPM10)),2)[3]` vegades menor.
+
+Es pot considerar que els odds obtingunts del model entren en contradicció amb l'exposat a partir de l'anàlisi cru, però l'introducció en el model d'altres variables explicatives (*vv* i *PRB*) fa que no es puguin comparar directament els odds per *RS_re* obtinguts en el model i en l'anàlisi cru.
+
+Quan s'afegeix la variable *month* en el model per a considerar l'estacionalitat s'observa que el model millora ja que l'AIC del model inicial era `r round(summary(model_logist_icPM10)$aic,2)` i l'AIC del model actualitzat amb la variable *month* és `r round(summary(model_logist_icPM10_b)$aic,2)`.
+
+Quan s'afegeix la variable *TMP* s'observa un canvi en els paràmetres estimats del model, però quan es considera la interacció *RS_renormalbaixa:TMP* s'obté que aquest terme no és estadísticament significatiu, per tant es pot afirmar que la variable *TMP* és una variable de confusió.
+
+El test de Hosmer-Lemeshow per a la bondat de l'ajust dona un p-valor molt petit, fet que obliga a rebutjar la hipòtesi nula i afirmar que existeixen diferencies entre els valors observats i els valors pronosticats pel model, conseqüentment el model no està correctament ajustat.
+
+Finalment, l'àrea sota la corba ROC és de `r round(auc(r),2)` que ens indica que el model té unes prestacions correctes sense arribar a ser excel·lents.
+
+
+```{r}
+
+```
+
